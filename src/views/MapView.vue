@@ -1,15 +1,71 @@
+<script setup>
+import { onMounted } from 'vue'
+import tourist from '@/assets/data/서울_관광지.json'
+
+const places = tourist.items
+
+onMounted(() => {
+  window.kakao.maps.load(() => {
+    const container = document.getElementById('map')
+
+    const options = {
+      center: new window.kakao.maps.LatLng(37.5665, 126.9780),
+      level: 7,
+    }
+
+    const map = new window.kakao.maps.Map(container, options)
+
+    // 관광지마다 마커 생성
+    places.forEach((place) => {
+      if (!place.mapx || !place.mapy) return
+
+      new window.kakao.maps.Marker({
+        map,
+        position: new window.kakao.maps.LatLng(
+          Number(place.mapy),
+          Number(place.mapx)
+        ),
+      })
+    })
+  })
+})
+</script>
+
 <template>
-  <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm min-h-[450px] flex flex-col justify-between">
-    <div>
-      <h3 class="font-bold text-slate-900 text-lg mb-2 flex items-center gap-2">
-        <span class="w-1.5 h-5 bg-emerald-500 rounded-full"></span>
-        서울/경기 지도 서비스
-      </h3>
-      <p class="text-sm text-slate-400 mt-4">카카오 맵 API를 연동하여 상권 및 인프라 정보를 시각화할 공간입니다.</p>
+  <div class="space-y-8">
+
+    <!-- 지도 -->
+    <div class="bg-white rounded-xl p-6 shadow">
+      <h2 class="text-2xl font-bold mb-4">
+        서울 관광지도
+      </h2>
+
+      <div
+        id="map"
+        class="w-full h-[600px] rounded-lg border"
+      ></div>
     </div>
-    <!-- 팀원 B가 카카오맵 띄울 가상 박스 -->
-    <div class="h-72 bg-slate-50 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-xs text-slate-400 font-medium">
-      [지도 영역 - B 팀원이 개발 예정]
+
+    <!-- 관광지 목록 -->
+    <div class="bg-white rounded-xl p-6 shadow">
+      <h2 class="text-xl font-bold mb-4">
+        관광지 목록 ({{ places.length }}개)
+      </h2>
+
+      <div
+        v-for="place in places"
+        :key="place.contentid"
+        class="border-b py-2 hover:bg-slate-50"
+      >
+        <div class="font-semibold">
+          {{ place.title }}
+        </div>
+
+        <div class="text-sm text-gray-500">
+          {{ place.addr1 }}
+        </div>
+      </div>
     </div>
+
   </div>
 </template>
