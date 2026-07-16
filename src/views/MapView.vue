@@ -1,189 +1,164 @@
 <script setup>
 import { ref, computed } from 'vue'
 import Sidebar from '@/components/map/Sidebar.vue'
-import tourist from '@/assets/data/서울_관광지.json'
-
 import KakaoMap from '@/components/map/KakaoMap.vue'
 import SearchBar from '@/components/map/SearchBar.vue'
+import tourist from '@/assets/data/서울_관광지.json'
+import culture from '@/assets/data/서울_문화시설.json'
+import festival from '@/assets/data/서울_쇼핑.json'
 
-const places = tourist.items
+const places = [
+  ...tourist.items.map(item => ({
+    ...item,
+    type: '관광지'
+  })),
 
-// 검색어
+  ...culture.items.map(item => ({
+    ...item,
+    type: '문화시설'
+  })),
+
+  ...festival.items.map(item => ({
+    ...item,
+    type: '쇼핑'
+  }))
+]
+
 const keyword = ref('')
+const filters = ref({
+  관광지: true,
+  문화시설: true,
+  쇼핑: true,
+})
+const selectedPlace = ref(null)
+const mapRef = ref(null)
 
-// 현재 선택된 관광지
-function selectPlace(place) {
+function onMarkerSelect(place) {
+  // 마커 클릭 시 상세정보 표시
   selectedPlace.value = place
+}
 
-  if (mapRef.value) {
+function onSidebarFocus(place) {
+  // 사이드바 클릭 시 지도만 이동(상세정보는 띄우지 않음)
+  if (mapRef.value && typeof mapRef.value.moveMap === 'function') {
     mapRef.value.moveMap(place)
   }
 }
 
-// 검색 결과
 const filteredPlaces = computed(() => {
-  if (!keyword.value) return places
+  return places.filter((place) => {
 
-  return places.filter(place =>
-    place.title
-      .toLowerCase()
-      .includes(keyword.value.toLowerCase())
-  )
+    // 종류 필터
+    if (!filters.value[place.type]) return false
+
+    // 검색
+    if (
+      keyword.value &&
+      !place.title.toLowerCase().includes(keyword.value.toLowerCase())
+    ) {
+      return false
+    }
+
+    return true
+  })
 })
-
-
 </script>
 
 <template>
-  <SearchBar v-model="keyword" />
-  <Sidebar
+  <div class="mb-6">
+    <div class="mb-5">
 
-    :places="places"
-
-    :selectedPlace="selectedPlace"
-
-    v-model="keyword"
-
-    @select-place="selectPlace"
-
-  />
-  <FilterPanel
-  @update="updateFilter"
-  @close="showFilter = false"
-  />
-  
-  <div class="grid grid-cols-12 gap-6">
-
-    <!-- 좌측 관광지 목록 -->
-    <div class="col-span-3">
-
-      <div class="bg-white rounded-2xl shadow p-5 h-[820px] overflow-y-auto">
-
-        <h2 class="text-xl font-bold mb-5">
-          관광지 목록
-        </h2>
-
-        <!-- 검색 -->
-        <input
-          v-model="keyword"
-          type="text"
-          placeholder="관광지 검색"
-          class="w-full border rounded-lg px-4 py-3 mb-5"
-        />
-
-        <!-- 목록 -->
-        <div
-          v-for="place in filteredPlaces"
-          :key="place.contentid"
-          @click="selectPlace(place)"
-          class="border rounded-xl p-3 mb-3 cursor-pointer hover:bg-blue-50 transition"
-        >
-
-          <img
-            v-if="place.firstimage"
-            :src="place.firstimage"
-            class="w-full h-32 object-cover rounded-lg mb-3"
-          />
-
-          <div
-            v-else
-            class="w-full h-32 bg-gray-100 rounded-lg flex items-center justify-center mb-3"
-          >
-            이미지 없음
-          </div>
-
-          <div class="font-bold">
-            {{ place.title }}
-          </div>
-
-          <div class="text-sm text-gray-500">
-            {{ place.addr1 }}
-          </div>
-
-        </div>
-
-      </div>
-
+    <div class="font-semibold mb-3">
+      카테고리
     </div>
 
-    <!-- 가운데 지도 -->
-    <div class="col-span-6">
+    <label class="flex items-center gap-2 mb-2 cursor-pointer">
+      <input
+        type="checkbox"
+        v-model="filters.관광지"
+      />
+      관광지
+    </label>
 
+    <label class="flex items-center gap-2 mb-2 cursor-pointer">
+      <input
+        type="checkbox"
+        v-model="filters.문화시설"
+      />
+      문화시설
+    </label>
+
+    <label class="flex items-center gap-2 cursor-pointer">
+      <input
+        type="checkbox"
+        v-model="filters.쇼핑"
+      />
+      쇼핑
+    </label>
+
+  </div>
+    <SearchBar v-model="keyword" />
+  </div>
+
+  <div class="grid grid-cols-12 gap-6">
+    <div class="col-span-3">
+      <Sidebar
+        :places="filteredPlaces"
+        :filters="filters"
+        :selectedPlace="selectedPlace"
+        v-model="keyword"
+        @focus-place="onSidebarFocus"
+      />
+    </div>
+
+    <div class="col-span-6">
       <KakaoMap
+        ref="mapRef"
         :places="filteredPlaces"
         :selectedPlace="selectedPlace"
-        @select-place="selectPlace"
+        @select-place="onMarkerSelect"
       />
-
     </div>
 
-    <!-- 우측 상세정보 -->
     <div class="col-span-3">
-
-      <div class="bg-white rounded-2xl shadow p-5 h-[820px]">
-
+      <div class="bg-white rounded-2xl shadow p-5 h-[700px]">
         <template v-if="selectedPlace">
-
           <img
             v-if="selectedPlace.firstimage"
             :src="selectedPlace.firstimage"
             class="w-full h-52 object-cover rounded-lg mb-4"
           />
-
-          <div
-            v-else
-            class="w-full h-52 bg-gray-100 rounded-lg flex items-center justify-center mb-4"
-          >
+          <div v-else class="w-full h-52 bg-gray-100 rounded-lg flex items-center justify-center mb-4">
             이미지 없음
           </div>
 
-          <h2 class="text-xl font-bold mb-3">
-            {{ selectedPlace.title }}
-          </h2>
+          <h2 class="text-xl font-bold mb-3">{{ selectedPlace.title }}</h2>
 
-          <div class="space-y-4">
-
-            <div>
-
-              <div class="font-semibold">
-                주소
-              </div>
-
-              <div class="text-gray-500">
-                {{ selectedPlace.addr1 || '정보 없음' }}
-              </div>
-
-            </div>
-
-            <div>
-
-              <div class="font-semibold">
-                전화번호
-              </div>
-
-              <div class="text-gray-500">
-                {{ selectedPlace.tel || '정보 없음' }}
-              </div>
-
-            </div>
-
+          <div class="mb-3">
+            <span
+              class="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-sm"
+            >
+              {{ selectedPlace.type }}
+            </span>
           </div>
 
+          <div class="space-y-4">
+            <div>
+              <div class="font-semibold">주소</div>
+              <div class="text-gray-500">{{ selectedPlace.addr1 || '정보 없음' }}</div>
+            </div>
+
+            <div>
+              <div class="font-semibold">전화번호</div>
+              <div class="text-gray-500">{{ selectedPlace.tel || '정보 없음' }}</div>
+            </div>
+          </div>
         </template>
 
         <template v-else>
-
-          <div
-            class="flex items-center justify-center h-full text-gray-400"
-          >
-            관광지를 선택하세요.
-          </div>
-
+          <div class="flex items-center justify-center h-full text-gray-400">관광지를 선택하세요.</div>
         </template>
-
       </div>
-
     </div>
-
   </div>
 </template>

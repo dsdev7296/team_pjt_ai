@@ -1,292 +1,348 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { onMounted, onBeforeUnmount, watch } from 'vue'
 
 const props = defineProps({
   places: {
     type: Array,
-    required: true
+    required: true,
   },
   selectedPlace: {
     type: Object,
-    default: null
-  }
+    default: null,
+  },
 })
 
 const emit = defineEmits([
-  'select-place'
+  'select-place',
 ])
 
-const map = ref(null)
+// ==========================
+// Kakao Map 객체
+// ==========================
+let map = null
+// let clusterer = null
 
-const clusterer = ref(null)
+// 현재 선택된 마커 하나만 관리
+let currentMarker = null
+let currentInfoWindow = null
 
-const markers = {}
+// 관광지별 Marker / InfoWindow 저장
+// const markers = new Map()
+// const infoWindows = new Map()
 
-const infoWindows = {}
+// 지도 생성 여부
+let initialized = false
 
+// ==========================
+// 최초 실행
+// ==========================
 onMounted(() => {
+  if (!window.kakao || !window.kakao.maps) {
+    console.error('Kakao Map SDK가 로드되지 않았습니다.')
+    return
+  }
+
   window.kakao.maps.load(() => {
     createMap()
-    createMarkers()
   })
 })
 
+onBeforeUnmount(() => {
+  clearInfoWindows()
+
+  if (clusterer) {
+    clusterer.clear()
+    clusterer = null
+  }
+
+  markers.clear()
+  infoWindows.clear()
+
+  map = null
+})
+
+// ==========================
+// 지도 생성
+// ==========================
 function createMap() {
+
+  if (initialized) return
+
   const container = document.getElementById('kakao-map')
 
-  map.value = new window.kakao.maps.Map(container, {
+  if (!container) {
+    console.error('지도 컨테이너를 찾을 수 없습니다.')
+    return
+  }
+
+  map = new window.kakao.maps.Map(container, {
     center: new window.kakao.maps.LatLng(
       37.5665,
       126.9780
     ),
-    level: 8
+    level: 8,
   })
+
+  // 클러스터는 단 한 번만 생성
+  clusterer = new window.kakao.maps.MarkerClusterer({
+    map,
+    averageCenter: true,
+    minLevel: 7,
+  })
+
+  initialized = true
 }
 
-function createMarkers() {
+// ==========================
+// 모든 InfoWindow 닫기
+// ==========================
+// function clearInfoWindows() {
 
-  const markerList = []
+//   infoWindows.forEach((infoWindow) => {
+//     infoWindow.close()
+//   })
 
-  props.places.forEach((place) => {
+// }
+// ==========================
+// 마커 생성 (최초 1회)
+// ==========================
+// function createMarkers() {
 
-    if (!place.mapx || !place.mapy) return
+//   const markerList = []
 
-    const marker = new window.kakao.maps.Marker({
+//   props.places.forEach((place) => {
 
-      position: new window.kakao.maps.LatLng(
-        Number(place.mapy),
-        Number(place.mapx)
-      )
+//     if (!place.mapx || !place.mapy) return
 
-    })
+//     const position = new window.kakao.maps.LatLng(
+//       Number(place.mapy),
+//       Number(place.mapx)
+//     )
 
-    markers[place.contentid] = marker
+//     // Marker 생성
+//     const marker = new window.kakao.maps.Marker({
+//       position,
+//     })
 
-    markerList.push(marker)
+//     markers.set(place.contentid, marker)
+//     markerList.push(marker)
 
-    const infoWindow = new window.kakao.maps.InfoWindow({
+//     // InfoWindow 생성
+//     const infoWindow = new window.kakao.maps.InfoWindow({
+//       content: `
+//         <div
+//           style="
+//             padding:10px;
+//             min-width:180px;
+//             font-size:14px;
+//             font-weight:bold;
+//           "
+//         >
+//           ${place.title}
+//         </div>
+//       `,
+//     })
 
-      content: `
-      <div style="
-        padding:10px;
-        min-width:180px;
-      ">
-        <strong>${place.title}</strong>
+//     infoWindows.set(place.contentid, infoWindow)
+
+//     // Marker 클릭 이벤트
+//     window.kakao.maps.event.addListener(
+//       marker,
+//       'click',
+//       () => {
+
+//         clearInfoWindows()
+
+//         infoWindow.open(map, marker)
+
+//         moveMap(place)
+
+//         emit('select-place', place)
+
+//       }
+//     )
+
+//   })
+
+// ==========================
+// 선택한 장소로 이동 + 마커 표시
+// ==========================
+function moveMap(place) {
+
+  if (!map || !place) return
+
+  // 기존 마커 제거
+  if (currentMarker) {
+    currentMarker.setMap(null)
+  }
+
+  // 기존 정보창 제거
+  if (currentInfoWindow) {
+    currentInfoWindow.close()
+  }
+
+  const position = new window.kakao.maps.LatLng(
+    Number(place.mapy),
+    Number(place.mapx)
+  )
+
+  // 새 마커 생성
+  currentMarker = new window.kakao.maps.Marker({
+    map,
+    position,
+  })
+
+  // 정보창 생성
+  currentInfoWindow = new window.kakao.maps.InfoWindow({
+    content: `
+      <div style="padding:8px 12px;font-weight:bold;">
+        ${place.title}
       </div>
-      `
-
-    })
-
-    infoWindows[place.contentid] = infoWindow
-
-    window.kakao.maps.event.addListener(
-      marker,
-      'click',
-      () => {
-
-        closeAllInfoWindows()
-
-        infoWindow.open(
-          map.value,
-          marker
-        )
-
-        moveTo(place)
-
-        emit(
-          'select-place',
-          place
-        )
-
-      }
-    )
-
+    `,
   })
 
-  clusterer.value =
-    new window.kakao.maps.MarkerClusterer({
+  currentInfoWindow.open(map, currentMarker)
 
-      map: map.value,
+  map.panTo(position)
 
-      averageCenter: true,
-
-      minLevel: 7
-
-    })
-
-  clusterer.value.addMarkers(
-    markerList
-  )
-
+  emit('select-place', place)
 }
 
-function closeAllInfoWindows() {
+//   // Marker는 한 번만 Clusterer에 등록
+//   clusterer.addMarkers(markerList)
 
-  Object.values(infoWindows).forEach(
-    infoWindow => {
+// }
+// ==========================
+// 선택된 관광지 변경
+// ==========================
+// watch(
+//   () => props.selectedPlace,
+//   (place) => {
 
-      infoWindow.close()
+//     if (!place) return
 
-    }
-  )
+//     moveMap(place)
 
-}
+//     clearInfoWindows()
 
-function moveTo(place) {
+//     const marker = markers.get(place.contentid)
+//     const infoWindow = infoWindows.get(place.contentid)
 
-  if (!place) return
+//     if (marker && infoWindow) {
+//       infoWindow.open(map, marker)
+//     }
 
-  const moveLatLng =
-    new window.kakao.maps.LatLng(
+//   }
+// )
 
-      Number(place.mapy),
 
-      Number(place.mapx)
+// ==========================
+// places 변경
+// (검색 결과가 변경될 때)
+// ==========================
+// watch(
+//   () => props.places,
+//   (newPlaces) => {
 
-    )
+//     if (!clusterer) return
 
-  map.value.setCenter(
-    moveLatLng
-  )
+//     // 기존 마커 숨기기
+//     markers.forEach((marker) => {
+//       marker.setMap(null)
+//     })
 
-  map.value.setLevel(4)
+//     clusterer.clear()
 
-}
+//     const visibleMarkers = []
+
+//     newPlaces.forEach((place) => {
+
+//       const marker = markers.get(place.contentid)
+
+//       if (!marker) return
+
+//       visibleMarkers.push(marker)
+
+//     })
+
+//     clusterer.addMarkers(visibleMarkers)
+
+//   }
+// )
 
 watch(
-
   () => props.selectedPlace,
-
   (place) => {
+    if (!place) return
+    moveMap(place)
+  }
+)
+
+// ==========================
+// 부모(MapView)에서 호출
+// ==========================
+defineExpose({
+
+  moveMap(place) {
 
     if (!place) return
 
-    moveTo(place)
+    moveMap(place)
 
-    closeAllInfoWindows()
+  },
 
-    const marker =
-      markers[place.contentid]
+})
 
-    const infoWindow =
-      infoWindows[place.contentid]
 
-    if (marker && infoWindow) {
+// ==========================
+// 지도 크기 변경 대응
+// ==========================
+window.addEventListener("resize", () => {
 
-      infoWindow.open(
-        map.value,
-        marker
-      )
+  if (!map) return
 
-    }
+  map.relayout()
 
-  }
-
-)
-import { computed } from 'vue'
-
-const selectedPlace = computed(() => props.selectedPlace)
+})
 </script>
-<template>
-  <div class="relative w-full h-full">
 
-    <!-- 카카오 지도 -->
+<template>
+  <div class="relative w-full">
+
+    <!-- Kakao Map -->
     <div
       id="kakao-map"
-      class="w-full h-[700px] rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+      class="w-full h-[700px] rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-white"
     ></div>
-
-    <!-- 지도 위 안내 -->
-    <div
-      class="absolute top-4 left-4 bg-white/95 backdrop-blur px-4 py-3 rounded-xl shadow-lg border border-slate-200"
-    >
-      <h3 class="text-base font-bold text-slate-800">
-        서울 관광지도
-      </h3>
-
-      <p class="text-sm text-slate-500 mt-1">
-        관광지를 클릭하면 상세 정보를 확인할 수 있습니다.
-      </p>
-    </div>
-
-    <!-- 선택된 관광지 미니 카드 -->
-    <transition
-      enter-active-class="transition duration-300"
-      leave-active-class="transition duration-200"
-      enter-from-class="opacity-0 translate-y-2"
-      enter-to-class="opacity-100 translate-y-0"
-      leave-from-class="opacity-100 translate-y-0"
-      leave-to-class="opacity-0 translate-y-2"
-    >
-      <div
-        v-if="selectedPlace"
-        class="absolute bottom-5 left-5 w-80 bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200"
-      >
-
-        <!-- 이미지 -->
-        <img
-          v-if="selectedPlace.firstimage"
-          :src="selectedPlace.firstimage"
-          :alt="selectedPlace.title"
-          class="w-full h-44 object-cover"
-        >
-
-        <div
-          v-else
-          class="w-full h-44 bg-slate-100 flex items-center justify-center text-slate-400"
-        >
-          이미지 없음
-        </div>
-
-        <!-- 내용 -->
-        <div class="p-5">
-
-          <div class="flex items-center justify-between">
-
-            <h2 class="text-lg font-bold text-slate-800">
-              {{ selectedPlace.title }}
-            </h2>
-
-            <span
-              class="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700"
-            >
-              관광지
-            </span>
-
-          </div>
-
-          <div class="mt-4 space-y-3 text-sm">
-
-            <div>
-
-              <p class="font-semibold text-slate-700">
-                주소
-              </p>
-
-              <p class="text-slate-500">
-                {{ selectedPlace.addr1 || '정보 없음' }}
-              </p>
-
-            </div>
-
-            <div>
-
-              <p class="font-semibold text-slate-700">
-                전화번호
-              </p>
-
-              <p class="text-slate-500">
-                {{ selectedPlace.tel || '정보 없음' }}
-              </p>
-
-            </div>
-
-          </div>
-
-        </div>
-
-      </div>
-    </transition>
 
   </div>
 </template>
+
+<style scoped>
+#kakao-map {
+  width: 100%;
+  height: 700px;
+}
+
+/* 카카오맵 타일 깜빡임 완화 */
+#kakao-map * {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+/* 지도 컨테이너 GPU 가속 */
+#kakao-map {
+  will-change: transform;
+}
+
+/* 이미지 리렌더링 방지 */
+#kakao-map img {
+  max-width: none !important;
+}
+
+/* outline 제거 */
+#kakao-map:focus {
+  outline: none;
+}
+</style>
