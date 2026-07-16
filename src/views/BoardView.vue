@@ -1,5 +1,12 @@
 <template>
   <div class="space-y-6 max-w-5xl mx-auto px-4 py-6">
+
+    <div
+      v-if="noticeMessage"
+      class="bg-blue-50 border border-blue-100 text-blue-700 px-4 py-3 rounded-xl text-sm font-bold"
+    >
+      {{ noticeMessage }}
+    </div>
     
     <div class="bg-white border border-slate-100 rounded-2xl p-3 shadow-sm flex flex-wrap gap-2">
       <button 
@@ -30,7 +37,7 @@
         </span>
       </div>
       <button 
-        @click="$router.push('/board/create')"
+        @click="openCreatePage"
         class="w-full sm:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm rounded-xl transition-all shadow-md shadow-blue-100 shrink-0 cursor-pointer"
       >
         글쓰기
@@ -163,7 +170,30 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onActivated, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+const noticeMessage = ref('')
+let noticeTimer = null
+
+const showStoredNotice = () => {
+  const message = sessionStorage.getItem('board_notice')
+  if (!message) return
+
+  noticeMessage.value = message
+  sessionStorage.removeItem('board_notice')
+
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeTimer = setTimeout(() => {
+    noticeMessage.value = ''
+  }, 2500)
+}
+
+const openCreatePage = async () => {
+  document.activeElement?.blur()
+  await router.push('/board/create')
+}
 
 const categories = [
   { label: '전체', value: 'all' },
@@ -361,9 +391,13 @@ const syncWithLocalStorage = () => {
     posts.value = dummyPosts
   }
 }
-onMounted(() => {
+const initializeBoard = () => {
   syncWithLocalStorage()
-})
+  showStoredNotice()
+}
+
+onMounted(initializeBoard)
+onActivated(initializeBoard)
 
 watch([currentCategory, searchQuery, sortBy], () => {
   currentPage.value = 1
