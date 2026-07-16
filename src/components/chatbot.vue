@@ -137,19 +137,11 @@ const handleSend = async () => {
   const userMessage = input.value.trim()
   if (!userMessage || isLoading.value) return
 
-  // 💡 [테스트용 콘솔] API 키 인입 여부 확인
-  console.log("-----------------------------------------");
-  console.log("현재 호출 중인 API Key:", import.meta.env.VITE_OPENAI_API_KEY);
-  console.log("-----------------------------------------");
-
   messages.value.push({ role: 'user', text: userMessage })
   input.value = ''
   await scrollToBottom()
 
   isLoading.value = true
-
-  // 💡 [자바스크립트 스코프 해결] catch 블록에서도 안전하게 접근할 수 있도록 변수를 handleSend 상단에 미리 선언합니다.
-  let searchResults = []
 
   try {
     const tourItems = (tourData && tourData.items) ? tourData.items : []
@@ -157,22 +149,25 @@ const handleSend = async () => {
     const shoppingItems = (shoppingData && shoppingData.items) ? shoppingData.items : []
     const allMergedItems = [...tourItems, ...cultureItems, ...shoppingItems]
 
-    // A. 사용자 질문 유형 판별 (사찰 vs 일반)
+    // 💡 A. 사용자 질문이 '절' 혹은 '사찰'에 대한 것인지 판별
     const isTempleQuery = userMessage.includes('절') || userMessage.includes('사찰')
 
-    // B. 자치구 명칭 매칭 판별
+    // 💡 B. 질문 속에 서울시 자치구(구)가 포함되어 있는지 판별
     const SeoulDistricts = ['종로', '중구', '용산', '성동', '광진', '동대문', '중랑', '성북', '강북', '도봉', '노원', '은평', '서대문', '마포', '양천', '강서', '구로', '금천', '영등포', '동작', '관악', '서초', '강남', '송파', '강동']
     const matchedDistrict = SeoulDistricts.find(district => userMessage.includes(district))
 
-    // C. 스마트 타겟 격리 (사찰 질문은 관광지 데이터만 타겟팅)
+    // 💡 C. [스마트 타겟 격리] 절/사찰을 물어봤을 때는 쇼핑/문화시설 데이터를 아예 배제하고 '관광지(tourItems)'에서만 검색!
     const targetItems = isTempleQuery ? tourItems : allMergedItems
 
-    // D. 사찰 정밀 예외처리 및 형태소 조사 제거 필터링 (결과를 변수에 대입)
-    searchResults = targetItems.filter(item => {
+    // 💡 D. 스마트 듀얼 필터링 로직
+    const searchResults = targetItems.filter(item => {
       const title = item.title || ''
       const addr = item.addr1 || ''
       
+      // 데이터 타이틀에서 괄호와 공백을 완전히 제거하여 사찰 여부를 정확하게 판별 (예: "봉은사(서울)" -> "봉은사")
       const cleanTitle = title.replace(/\s+/g, '').replace(/\([^)]*\)/g, '')
+      
+      // '사'나 '암'으로 끝나되, 회사/지사/상사/전파사/여행사 등 가짜 사찰 단어는 제외
       const isItemTemple = (cleanTitle.endsWith('사') || cleanTitle.endsWith('암') || title.includes('사찰') || title.includes('절')) &&
                            !cleanTitle.endsWith('회사') &&
                            !cleanTitle.endsWith('지사') &&
@@ -182,12 +177,16 @@ const handleSend = async () => {
                            !cleanTitle.endsWith('여행사')
 
       if (isTempleQuery) {
+        // [A] 사찰 관련 질문일 때: 사찰이 아닌 데이터는 원천 차단
         if (!isItemTemple) return false
+        
+        // 특정 자치구(예: 강남)가 언급되었다면 주소지에 포함되어야 함
         if (matchedDistrict) {
           return addr.includes(matchedDistrict)
         }
         return true
       } else {
+        // [B] 일반 키워드 질문일 때: 형태소 분석(조사 제거) 매칭 적용
         const stopWords = ['있는', '에서', '근처', '가까운', '추천', '알려줘', '해줘', '보여줘', '찾아줘', '어디', '있어', '있나요', '의', '에', '이', '가', '은', '는']
         const cleanWords = userMessage.split(/\s+/)
           .map(w => w.replace(/(에|에서|의|도|은|는|이|가|구|동)$/, ''))
@@ -201,7 +200,7 @@ const handleSend = async () => {
       }
     })
 
-    // E. 무작위 셔플 후 모바일 가독성을 위해 최대 5개 조절
+    // E. 무작위 셔플 후 최대 5개 추출하여 컨텍스트 구성
     const MAX_RESULTS = 5
     const shuffled = [...searchResults].sort(() => Math.random() - 0.5)
     const dbContextItems = shuffled.slice(0, MAX_RESULTS)
@@ -211,7 +210,7 @@ const handleSend = async () => {
       throw new Error('API 키가 설정되지 않았습니다.')
     }
 
-    // F. OpenAI API 호출 (존재하는 공식 최신 모델명인 gpt-4o-mini로 정정)
+    // F. OpenAI API 호출
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -219,7 +218,7 @@ const handleSend = async () => {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini', // 👈 400 에러를 해결하는 공식 모델명입니다.
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
@@ -252,9 +251,10 @@ const handleSend = async () => {
     }
 
     const data = await response.json()
+    
     let aiResponse = data.choices[0].message.content
 
-    // G. 최종 문구 하단에 잔여 검색 결과 개수 결합
+    // 남은 개수 문구 강제 결합
     if (searchResults.length > MAX_RESULTS) {
       const remainingCount = searchResults.length - MAX_RESULTS
       aiResponse += `\n\n...이 외에도 ${remainingCount}개의 검색 결과가 더 있습니다. 조금 더 구체적인 단어로 검색해 주세요!`
@@ -265,7 +265,7 @@ const handleSend = async () => {
   } catch (error) {
     console.error(error)
     
-    // 💡 [ReferenceError 해결] 이제 searchResults 변수가 외부 스코프에 선언되어 있어 에러가 나지 않습니다.
+    // 예외 발생 시 로컬 대체(Fallback) 안전장치
     if (searchResults && searchResults.length > 0) {
       const topResults = searchResults.slice(0, 5)
       let fallbackText = "⚠️ [안내] 현재 일시적인 연결 지연으로 로컬 검색 결과만 빠르게 안내해 드릴게요!\n\n"
