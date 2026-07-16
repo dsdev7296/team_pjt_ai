@@ -171,8 +171,9 @@
 
 <script setup>
 import { ref, computed, onActivated, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
+const route = useRoute()
 const router = useRouter()
 const noticeMessage = ref('')
 let noticeTimer = null
@@ -391,9 +392,21 @@ const syncWithLocalStorage = () => {
     posts.value = dummyPosts
   }
 }
+const validCategories = categories.map((category) => category.value)
+
+const applyRouteCategory = () => {
+  const category = route.query.category
+
+  currentCategory.value =
+    typeof category === 'string' && validCategories.includes(category)
+      ? category
+      : 'all'
+}
+
 const initializeBoard = () => {
   syncWithLocalStorage()
   showStoredNotice()
+  applyRouteCategory()
 }
 
 onMounted(initializeBoard)
@@ -402,6 +415,14 @@ onActivated(initializeBoard)
 watch([currentCategory, searchQuery, sortBy], () => {
   currentPage.value = 1
 })
+
+watch(
+  () => route.query.category,
+  () => {
+    applyRouteCategory()
+    currentPage.value = 1
+  }
+)
 
 const currentCategoryLabel = computed(() => {
   return categories.find(c => c.value === currentCategory.value)?.label || '전체'
