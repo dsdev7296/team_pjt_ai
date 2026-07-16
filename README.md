@@ -77,7 +77,7 @@ VITE_OPENAI_API_KEY=여기에_API_KEY_입력
 `.env.example`
 
 ```env
-VITE_OPENAI_API_KEY=
+VITE_OPENAI_API_KEY=임의의_API_KEY
 ```
 
 ### 5. 개발 서버 실행
@@ -208,7 +208,10 @@ src
 
 ## 🤖 Chatbot
 
-OpenAI API를 활용하여 관광 정보를 안내하는 AI 챗봇을 제공합니다.
+OpenAI API를 활용하여 서울 관광지, 문화시설, 쇼핑공간 정보를 안내하는 AI 챗봇을 제공합니다.
+검색 데이터를 입력하면 DB와 연동하여 관련된 무작위의 자료를 제시하여 지도 탐색 시 사전 정보 제공의 기능을 갖습니다.
+추가적으로 연관 데이터의 추가 갯수를 제시하여 지도를 통한 세부검색에 도움
+
 
 ---
 
