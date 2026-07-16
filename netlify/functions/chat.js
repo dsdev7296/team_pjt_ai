@@ -1,76 +1,158 @@
 // netlify/functions/chat.js
-exports.handler = async (event, context) => {
-  // POST 요청만 허용합니다.
-  if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: "Method Not Allowed" };
+
+export default async (request) => {
+  const jsonHeaders = {
+    'Content-Type': 'application/json',
+  }
+
+  if (request.method !== 'POST') {
+    return new Response(
+      JSON.stringify({
+        error: 'POST 요청만 허용됩니다.',
+      }),
+      {
+        status: 405,
+        headers: jsonHeaders,
+      },
+    )
   }
 
   try {
-    // 💡 Netlify 금고에 저장해둔 진짜 API 키를 서버 내부에서 안전하게 꺼냅니다.
-    const apiKey = process.env.OPENAI_API_KEY; 
+    const apiKey = process.env.OPENAI_API_KEY
+
     if (!apiKey) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: "API 키가 Netlify에 설정되지 않았습니다." })
-      };
+      return new Response(
+        JSON.stringify({
+          error: 'OPENAI_API_KEY가 설정되지 않았습니다.',
+        }),
+        {
+          status: 500,
+          headers: jsonHeaders,
+        },
+      )
     }
 
-    // Vue 화면에서 보낸 사용자의 질문과 1차 필터링된 데이터(dbContextItems)를 파싱합니다.
-    const { userMessage, dbContextItems } = JSON.parse(event.body);
+    const body = await request.json()
 
-    // 네트리파이 백엔드 내부에서 OpenAI API를 비밀리에 호출합니다. (사용자 화면엔 절대 노출되지 않음)
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `너는 지역 정보 추천 전문가야. 제공된 [지역 정보 데이터] 리스트를 기반으로 사용자의 질문에 연상 추론을 활용하여 답변해라.
-예를 들어 사용자가 '쇼핑'을 물어봤다면, 데이터 중 이름에 '쇼핑'이 없더라도 '시장', '문구완구거리', '플래그십 스토어', '인사동길'처럼 쇼핑이나 물건 구매와 연관된 장소를 똑똑하게 추출해서 추천해 주어야 한다.
+    const userMessage = String(
+      body.userMessage ?? '',
+    ).trim()
 
-[⚠️ 출력 포맷 규칙 - 모바일 최적화]
-1. 불필요한 미사여구, 긴 설명, 서론/결론은 모두 제거하고 최대 5개 장소만 골라 출력해라.
-2. 각 추천 장소는 오직 아래 양식만을 칼같이 지켜서 한 줄씩 마크다운으로 깔끔하게 작성해라.
+    const dbContextItems = Array.isArray(
+      body.dbContextItems,
+    )
+      ? body.dbContextItems
+      : []
 
-📍 **[장소명]**
-🏠 주소: [주소]
+    if (!userMessage) {
+      return new Response(
+        JSON.stringify({
+          error: '사용자 메시지가 없습니다.',
+        }),
+        {
+          status: 400,
+          headers: jsonHeaders,
+        },
+      )
+    }
 
-(추천할 장소 세트 사이에는 한 줄씩 공백을 둬라.)
-(조건에 맞는 연상 장소가 정말 단 하나도 없다면 "요청하신 조건에 일치하는 정보를 찾을 수 없습니다."라고만 짧게 대답해라.)`
-          },
-          {
-            role: 'user',
-            content: `사용자 질문: "${userMessage}"\n\n[지역 정보 데이터 (이 안에서만 골라라)]:\n${JSON.stringify(dbContextItems, null, 2)}`
-          }
-        ],
-        temperature: 0.4
+    const contextText = dbContextItems
+      .map((item, index) => {
+        return [
+          `${index + 1}. ${item.title ?? '이름 없음'}`,
+          `카테고리: ${item.originCat ?? '정보 없음'}`,
+          `주소: ${item.addr1 ?? '정보 없음'}`,
+          `전화번호: ${item.tel ?? '정보 없음'}`,
+        ].join('\n')
       })
-    });
+      .join('\n\n')
 
-    if (!response.ok) {
-      const errText = await response.text();
-      return { statusCode: response.status, body: errText };
+    const systemPrompt = `
+당신은 서울 지역 정보를 안내하는 LocalHub AI 도우미입니다.
+
+다음 원칙을 지켜 답변하세요.
+
+1. 제공된 로컬 데이터를 우선 사용합니다.
+2. 장소를 추천할 때 장소명과 주소를 함께 안내합니다.
+3. 제공된 데이터에 없는 내용을 사실처럼 만들지 않습니다.
+4. 답변은 자연스러운 한국어로 작성합니다.
+5. 추천 결과는 읽기 쉽게 정리합니다.
+`.trim()
+
+    const userPrompt = `
+사용자 질문:
+${userMessage}
+
+검색된 로컬 데이터:
+${contextText || '관련 로컬 데이터가 없습니다.'}
+
+위 데이터를 참고하여 사용자 질문에 답변하세요.
+`.trim()
+
+    const openAiResponse = await fetch(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: systemPrompt,
+            },
+            {
+              role: 'user',
+              content: userPrompt,
+            },
+          ],
+          temperature: 0.7,
+        }),
+      },
+    )
+
+    const data = await openAiResponse.json()
+
+    if (!openAiResponse.ok) {
+      console.error('OpenAI API 오류:', data)
+
+      return new Response(
+        JSON.stringify({
+          error:
+            data?.error?.message ??
+            'OpenAI API 요청에 실패했습니다.',
+        }),
+        {
+          status: openAiResponse.status,
+          headers: jsonHeaders,
+        },
+      )
     }
 
-    const data = await response.json();
-    
-    // 성공 시 OpenAI 답변 텍스트를 프론트엔드로 돌려줍니다.
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data)
-    };
-
+    return new Response(
+      JSON.stringify(data),
+      {
+        status: 200,
+        headers: jsonHeaders,
+      },
+    )
   } catch (error) {
-    console.error("Netlify Function Error:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "백엔드 연동 중 내부 오류가 발생했습니다." })
-    };
+    console.error('Netlify chat 함수 오류:', error)
+
+    return new Response(
+      JSON.stringify({
+        error:
+          error instanceof Error
+            ? error.message
+            : '서버 오류가 발생했습니다.',
+      }),
+      {
+        status: 500,
+        headers: jsonHeaders,
+      },
+    )
   }
-};
+}
