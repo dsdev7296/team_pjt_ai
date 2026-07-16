@@ -8,6 +8,8 @@
     </main>
 
     <Appfooter />
+    <Chatbot />
+  
   </div>
 </template>
 
@@ -16,4 +18,5 @@ import { RouterView } from 'vue-router'
 import Appheader from './components/Appheader.vue'
 import HeroBanner from './components/HeroBanner.vue'
 import Appfooter from './components/Appfooter.vue'
+import Chatbot from './components/chatbot.vue';
 </script>
