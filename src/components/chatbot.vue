@@ -105,7 +105,7 @@
 <script setup>
 import { ref, nextTick } from 'vue'
 
-// 📌 1. assets/data/ 폴더 경로 지정 (프로젝트 환경에 맞게 @ 또는 상대 경로 선택)
+// 📌 1. 로컬 데이터 Import
 import tourData from '@/assets/data/서울_관광지.json' 
 import cultureData from '@/assets/data/서울_문화시설.json'
 import shoppingData from '@/assets/data/서울_쇼핑.json'
@@ -137,81 +137,78 @@ const handleSend = async () => {
   const userMessage = input.value.trim()
   if (!userMessage || isLoading.value) return
 
-  // 💡 [테스트용 콘솔] API 키 인입 여부 확인
-  console.log("-----------------------------------------");
-  console.log("현재 호출 중인 API Key:", import.meta.env.VITE_OPENAI_API_KEY);
-  console.log("-----------------------------------------");
-
   messages.value.push({ role: 'user', text: userMessage })
   input.value = ''
   await scrollToBottom()
 
   isLoading.value = true
 
-  // 💡 [자바스크립트 스코프 해결] catch 블록에서도 안전하게 접근할 수 있도록 변수를 handleSend 상단에 미리 선언합니다.
   let searchResults = []
 
   try {
     const tourItems = (tourData && tourData.items) ? tourData.items : []
     const cultureItems = (cultureData && cultureData.items) ? cultureData.items : []
     const shoppingItems = (shoppingData && shoppingData.items) ? shoppingData.items : []
-    const allMergedItems = [...tourItems, ...cultureItems, ...shoppingItems]
+    
+    // 💡 [개선 포인트 1] 각 데이터가 어디 출신인지 카테고리 태그를 미리 달아줍니다.
+    const tourTags = tourItems.map(i => ({ ...i, originCat: '관광지' }))
+    const cultureTags = cultureItems.map(i => ({ ...i, originCat: '문화시설' }))
+    const shoppingTags = shoppingItems.map(i => ({ ...i, originCat: '쇼핑명소' }))
+    const allMergedItems = [...tourTags, ...cultureTags, ...shoppingTags]
 
-    // A. 사용자 질문 유형 판별 (사찰 vs 일반)
-    const isTempleQuery = userMessage.includes('절') || userMessage.includes('사찰')
-
-    // B. 자치구 명칭 매칭 판별
+    // 질문 속 자치구 탐색
     const SeoulDistricts = ['종로', '중구', '용산', '성동', '광진', '동대문', '중랑', '성북', '강북', '도봉', '노원', '은평', '서대문', '마포', '양천', '강서', '구로', '금천', '영등포', '동작', '관악', '서초', '강남', '송파', '강동']
     const matchedDistrict = SeoulDistricts.find(district => userMessage.includes(district))
 
-    // C. 스마트 타겟 격리 (사찰 질문은 관광지 데이터만 타겟팅)
-    const targetItems = isTempleQuery ? tourItems : allMergedItems
+    // 💡 [개선 포인트 2] 연상 기법용 동의어 맵 매칭 (1차 필터 구멍 넓히기)
+    // 사용자가 '쇼핑'을 검색하면 '시장', '거리', '스토어', '몰' 등도 1차 검색 타겟에 포함되도록 만듭니다.
+    let semanticKeywords = [userMessage]
+    if (userMessage.includes('쇼핑') || userMessage.includes('살곳')) {
+      semanticKeywords.push('시장', '마트', '거리', '몰', '상가', '문구', '완구', '스토어', '백화점')
+    }
+    if (userMessage.includes('놀거리') || userMessage.includes('볼거리') || userMessage.includes('추천')) {
+      semanticKeywords.push('공원', '광장', '길', '마을', '체험', '타워')
+    }
 
-    // D. 사찰 정밀 예외처리 및 형태소 조사 제거 필터링 (결과를 변수에 대입)
-    searchResults = targetItems.filter(item => {
+    // 사찰 예외 처리
+    const isTempleQuery = userMessage.includes('절') || userMessage.includes('사찰')
+
+    // 💡 [개선 포인트 3] 스마트 하이브리드 필터링
+    searchResults = allMergedItems.filter(item => {
       const title = item.title || ''
       const addr = item.addr1 || ''
       
-      const cleanTitle = title.replace(/\s+/g, '').replace(/\([^)]*\)/g, '')
-      const isItemTemple = (cleanTitle.endsWith('사') || cleanTitle.endsWith('암') || title.includes('사찰') || title.includes('절')) &&
-                           !cleanTitle.endsWith('회사') &&
-                           !cleanTitle.endsWith('지사') &&
-                           !cleanTitle.endsWith('본사') &&
-                           !cleanTitle.endsWith('상사') &&
-                           !cleanTitle.endsWith('전파사') &&
-                           !cleanTitle.endsWith('여행사')
-
+      // 사찰 질문 전용 필터
       if (isTempleQuery) {
+        const cleanTitle = title.replace(/\s+/g, '').replace(/\([^)]*\)/g, '')
+        const isItemTemple = (cleanTitle.endsWith('사') || cleanTitle.endsWith('암') || title.includes('사찰') || title.includes('절')) &&
+                             !cleanTitle.endsWith('회사') && !cleanTitle.endsWith('지사') && !cleanTitle.endsWith('본사') && !cleanTitle.endsWith('상사')
         if (!isItemTemple) return false
-        if (matchedDistrict) {
-          return addr.includes(matchedDistrict)
-        }
-        return true
-      } else {
-        const stopWords = ['있는', '에서', '근처', '가까운', '추천', '알려줘', '해줘', '보여줘', '찾아줘', '어디', '있어', '있나요', '의', '에', '이', '가', '은', '는']
-        const cleanWords = userMessage.split(/\s+/)
-          .map(w => w.replace(/(에|에서|의|도|은|는|이|가|구|동)$/, ''))
-          .filter(w => w.length > 1 && !stopWords.includes(w))
-
-        if (cleanWords.length > 0) {
-          return cleanWords.every(word => title.includes(word) || addr.includes(word))
-        }
-        
-        return title.includes(userMessage) || addr.includes(userMessage)
+        return matchedDistrict ? addr.includes(matchedDistrict) : true
       }
+
+      // 💡 자치구 기반 필터링 강화
+      // 질문에 '종로'가 들어있으면, 일차적으로 종로구에 있는 모든 데이터를 모읍니다. (문자열 일치 실패로 차단되는 현상 방지)
+      if (matchedDistrict) {
+        if (!addr.includes(matchedDistrict)) return false
+        // 구가 맞다면 장소명이나 주소에 사용자의 연상 키워드가 하나라도 걸치는지 검사
+        return semanticKeywords.some(kw => title.includes(w => kw) || addr.includes(kw) || title.includes(userMessage) || item.originCat.includes(userMessage)) || true
+      }
+
+      // 구 언급이 없는 일반 검색일 때
+      return title.includes(userMessage) || addr.includes(userMessage)
     })
 
-    // E. 무작위 셔플 후 모바일 가독성을 위해 최대 5개 조절
-    const MAX_RESULTS = 5
+    // 💡 [개선 포인트 4] 후보군을 넉넉히(최대 15개) 무작위로 뽑아서 AI에게 브레인 역할을 맡깁니다.
     const shuffled = [...searchResults].sort(() => Math.random() - 0.5)
-    const dbContextItems = shuffled.slice(0, MAX_RESULTS)
+    const dbContextItems = shuffled.slice(0, 15)
 
     const apiKey = import.meta.env.VITE_OPENAI_API_KEY
     if (!apiKey) {
       throw new Error('API 키가 설정되지 않았습니다.')
     }
 
-    // F. OpenAI API 호출 (존재하는 공식 최신 모델명인 gpt-4o-mini로 정정)
+    // OpenAI API 호출
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -219,31 +216,29 @@ const handleSend = async () => {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini', // 👈 400 에러를 해결하는 공식 모델명입니다.
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
-            content: `너는 LocalHub AI 도우미야. 아래 제공되는 [지역 정보 데이터]만을 기반으로 사용자의 질문에 답해라.
-모바일 사용자의 작은 화면 가독성을 위해 아래의 출력 형태를 뼈대 삼아 절대로 어기지 말고 출력해야 해.
+            content: `너는 지역 정보 추천 전문가야. 제공된 [지역 정보 데이터] 리스트를 기반으로 사용자의 질문에 연상 추론을 활용하여 답변해라.
+예를 들어 사용자가 '쇼핑'을 물어봤다면, 데이터 중 이름에 '쇼핑'이 없더라도 '시장', '문구완구거리', '플래그십 스토어', '인사동길'처럼 쇼핑이나 물건 구매와 연관된 장소를 똑똑하게 추출해서 추천해 주어야 한다. '놀거리'를 물어봤다면 공원이나 롯데월드 같은 곳을 골라라.
 
-[⚠️ 절대 준수 규칙]
-1. 검색 결과는 무조건 제공된 데이터 안에서만 구성할 것.
-2. 장황한 인사말, 설명문, 미사여구는 전부 생략하고 딱 장소 정보만 보여줄 것.
-3. 무조건 아래 예시 형태처럼 '장소명'과 '주소'만 단순하게 한 라인씩 마크다운으로 깔끔하게 출력할 것.
+[⚠️ 출력 포맷 규칙 - 모바일 최적화]
+1. 불필요한 미사여구, 긴 설명, 서론/결론은 모두 제거하고 최대 5개 장소만 골라 출력해라.
+2. 각 추천 장소는 오직 아래 양식만을 칼같이 지켜서 한 줄씩 마크다운으로 깔끔하게 작성해라.
 
-[출력 양식 예시]
 📍 **[장소명]**
 🏠 주소: [주소]
 
-(검색결과가 여러 개라면 위 세트를 한 줄 띄우고 순서대로 나열해라.)
-(만약 데이터가 텅 비어있다면 "요청하신 조건에 일치하는 정보를 찾을 수 없습니다."라고 딱 한 줄만 답해라.)`
+(추천할 장소 세트 사이에는 한 줄씩 공백을 둬라.)
+(조건에 맞는 연상 장소가 정말 단 하나도 없다면 "요청하신 조건에 일치하는 정보를 찾을 수 없습니다."라고만 짧게 대답해라.)`
           },
           {
             role: 'user',
-            content: `사용자 질문: "${userMessage}"\n\n[지역 정보 데이터]:\n${JSON.stringify(dbContextItems, null, 2)}`
+            content: `사용자 질문: "${userMessage}"\n\n[지역 정보 데이터 (이 안에서만 골라라)]:\n${JSON.stringify(dbContextItems, null, 2)}`
           }
         ],
-        temperature: 0.3
+        temperature: 0.4
       })
     })
 
@@ -254,37 +249,24 @@ const handleSend = async () => {
     const data = await response.json()
     let aiResponse = data.choices[0].message.content
 
-    // G. 최종 문구 하단에 잔여 검색 결과 개수 결합
-    if (searchResults.length > MAX_RESULTS) {
-      const remainingCount = searchResults.length - MAX_RESULTS
-      aiResponse += `\n\n...이 외에도 ${remainingCount}개의 검색 결과가 더 있습니다. 조금 더 구체적인 단어로 검색해 주세요!`
+    // 남은 개수 안내 문구 강제 하단 결합
+    if (searchResults.length > 5) {
+      const remainingCount = searchResults.length - 5
+      aiResponse += `\n\n...이 외에도 약 ${remainingCount}개의 관련 결과가 더 있습니다. 조금 더 구체적인 키워드를 말씀해주시면 추가로 찾아드릴게요!`
     }
 
     messages.value.push({ role: 'ai', text: aiResponse })
 
   } catch (error) {
     console.error(error)
-    
-    // 💡 [ReferenceError 해결] 이제 searchResults 변수가 외부 스코프에 선언되어 있어 에러가 나지 않습니다.
+    // 에러 시 로컬 백업 안내 (최대 5개)
     if (searchResults && searchResults.length > 0) {
       const topResults = searchResults.slice(0, 5)
-      let fallbackText = "⚠️ [안내] 현재 일시적인 연결 지연으로 로컬 검색 결과만 빠르게 안내해 드릴게요!\n\n"
-      
-      fallbackText += topResults.map(item => 
-        `📍 **${item.title}**\n🏠 주소: ${item.addr1}`
-      ).join('\n\n')
-      
-      if (searchResults.length > 5) {
-        const remainingCount = searchResults.length - 5
-        fallbackText += `\n\n...이 외에도 ${remainingCount}개의 검색 결과가 더 있습니다. 조금 더 구체적인 단어로 검색해 주세요!`
-      }
-      
+      let fallbackText = "⚠️ [안내] AI 연상 기능 일시 지연으로 일치하는 원본 데이터만 표시합니다.\n\n"
+      fallbackText += topResults.map(item => `📍 **${item.title}**\n🏠 주소: ${item.addr1}`).join('\n\n')
       messages.value.push({ role: 'ai', text: fallbackText })
     } else {
-      messages.value.push({ 
-        role: 'ai', 
-        text: '죄송합니다. 현재 서비스 연결에 오류가 발생했으며, 일치하는 로컬 정보도 찾을 수 없습니다.' 
-      })
+      messages.value.push({ role: 'ai', text: '죄송합니다. 현재 서비스 연결에 오류가 발생했습니다.' })
     }
   } finally {
     isLoading.value = false
